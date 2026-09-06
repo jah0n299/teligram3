@@ -20,10 +20,18 @@ python main.py
 
 Install `ffmpeg` and make both `ffmpeg` and `ffprobe` available on `PATH`.
 yt-dlp needs them to extract MP3 audio and merge separate video/audio streams.
-The hosting runtime must include these binaries; installing the Python package
-alone is not sufficient.
+The Dockerfile installs `ffmpeg`, `ffprobe`, and Node.js. Node.js plus the
+`yt-dlp[default]` extra provide the JavaScript support required by current
+YouTube extractors. The hosting runtime must use the repository Dockerfile;
+installing the Python package alone is not sufficient.
 
 ## Runtime
 
 Install Python dependencies with `pip install -r requirements.txt`. The
 included `Procfile` starts the polling bot with `python main.py`.
+
+After changing `requirements.txt` or `Dockerfile` in Render, trigger a
+manual deploy with **Clear build cache & deploy** so an old yt-dlp version is
+not reused. Do not add cookies, browser sessions, or login credentials:
+private, DRM-protected, and access-controlled videos are intentionally not
+supported.
