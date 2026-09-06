@@ -10,6 +10,7 @@ from telegram.ext import (
     MessageHandler,
     filters,
 )
+from telegram.error import Forbidden
 
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
@@ -64,6 +65,16 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(answer, reply_markup=MENU)
 
 
+async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
+    error = context.error
+
+    if isinstance(error, Forbidden):
+        print("Foydalanuvchi botni bloklagan yoki chatga kirish yopilgan.")
+        return
+
+    print(f"Kutilmagan xato: {error!r}")
+
+
 def main():
     threading.Thread(target=start_health_server, daemon=True).start()
 
@@ -72,6 +83,7 @@ def main():
     application.add_handler(
         MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message)
     )
+    application.add_error_handler(error_handler)
 
     print("Bot ishga tushdi...")
     application.run_polling()
