@@ -1,6 +1,7 @@
 import asyncio
 import os
 import re
+import shutil
 import tempfile
 import threading
 from pathlib import Path
@@ -80,12 +81,17 @@ def is_public_youtube_url(value: str) -> bool:
 
 
 def download_media(url: str, media_type: str, directory: str) -> Path:
+    if not shutil.which("ffmpeg") or not shutil.which("ffprobe"):
+        raise RuntimeError("ffmpeg/ffprobe topilmadi.")
+
     if media_type == "audio":
         options = {
             "format": "bestaudio/best",
             "outtmpl": os.path.join(directory, "%(title)s.%(ext)s"),
             "noplaylist": True,
             "restrictfilenames": True,
+            "quiet": True,
+            "no_warnings": True,
             "postprocessors": [
                 {"key": "FFmpegExtractAudio", "preferredcodec": "mp3", "preferredquality": "192"}
             ],
@@ -97,19 +103,22 @@ def download_media(url: str, media_type: str, directory: str) -> Path:
             "outtmpl": os.path.join(directory, "%(title)s.%(ext)s"),
             "noplaylist": True,
             "restrictfilenames": True,
+            "quiet": True,
+            "no_warnings": True,
         }
 
     with yt_dlp.YoutubeDL(options) as downloader:
         downloader.download([url])
 
+    expected_suffix = ".mp3" if media_type == "audio" else ".mp4"
     files = [
         path
         for path in Path(directory).iterdir()
-        if path.is_file() and not path.name.endswith((".part", ".ytdl"))
+        if path.is_file() and path.suffix.lower() == expected_suffix
     ]
-    if len(files) != 1:
+    if not files:
         raise RuntimeError("Yuklangan faylni aniqlab bo'lmadi.")
-    return files[0]
+    return max(files, key=lambda path: path.stat().st_mtime)
 
 
 async def download_choice(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -144,8 +153,15 @@ async def download_choice(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     )
     except (yt_dlp.utils.DownloadError, OSError, RuntimeError, TelegramError) as error:
         print(f"YouTube yuklash xatosi: {error!r}")
+        error_text = str(error).lower()
+        if "ffmpeg" in error_text or "ffprobe" in error_text:
+            message = "Serverda ffmpeg topilmadi. Render Docker deploy ishlatayotganini tekshiring."
+        elif "sign in" in error_text or "private" in error_text:
+            message = "Bu video ochiq emas yoki kirish talab qiladi. Faqat public videolar qo'llanadi."
+        else:
+            message = "Yuklab bo'lmadi. Public YouTube havolasini qayta tekshiring yoki keyinroq urinib ko'ring."
         await query.message.reply_text(
-            "Yuklab bo'lmadi. Havola ochiq va to'g'ri ekanini tekshiring."
+            message
         )
 
 
