@@ -31,14 +31,10 @@ if not BOT_TOKEN:
     raise RuntimeError("BOT_TOKEN environment variable is not set")
 
 MAX_FILE_SIZE = int(os.getenv("MAX_FILE_SIZE", str(49 * 1024 * 1024)))
-YOUTUBE_HOSTS = {
-    "youtube.com",
-    "www.youtube.com",
-    "m.youtube.com",
-    "music.youtube.com",
-    "youtu.be",
-}
 YOUTUBE_URL_PATTERN = re.compile(r"^https?://", re.IGNORECASE)
+YOUTUBE_HOST_PATTERN = re.compile(
+    r"^(?:(?:www|m|music)\.)?youtube\.com$|^youtu\.be$", re.IGNORECASE
+)
 
 
 class HealthHandler(BaseHTTPRequestHandler):
@@ -73,11 +69,40 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
+def normalize_youtube_url(value: str) -> str | None:
+    candidate = value.strip().rstrip(".,!?)]}")
+    if not YOUTUBE_URL_PATTERN.match(candidate):
+        candidate = f"https://{candidate}"
+    parsed = urlparse(candidate)
+    hostname = parsed.hostname.lower() if parsed.hostname else ""
+    if (
+        parsed.scheme not in {"http", "https"}
+        or not YOUTUBE_HOST_PATTERN.fullmatch(hostname)
+        or not parsed.path.strip("/")
+    ):
+        return None
+    return candidate
+
+
 def is_public_youtube_url(value: str) -> bool:
-    if not YOUTUBE_URL_PATTERN.match(value):
-        return False
-    parsed = urlparse(value)
-    return parsed.hostname is not None and parsed.hostname.lower() in YOUTUBE_HOSTS
+    return normalize_youtube_url(value) is not None
+
+
+def download_error_message(error: Exception) -> str:
+    error_text = str(error).lower()
+    if "ffmpeg" in error_text or "ffprobe" in error_text:
+        return "Serverda ffmpeg topilmadi. Render Docker deploy ishlatayotganini tekshiring."
+    if "private video" in error_text or "this video is private" in error_text:
+        return "Bu video private. Faqat hammaga ochiq videolar qo'llanadi."
+    if "age-restricted" in error_text or "confirm your age" in error_text:
+        return "Bu video yosh chekloviga ega va autentifikatsiyasiz qo'llab-quvvatlanmaydi."
+    if "sign in to confirm you're not a bot" in error_text:
+        return "YouTube qo'shimcha tekshiruv so'ramoqda. Keyinroq qayta urinib ko'ring."
+    if "video unavailable" in error_text or "content isn't available" in error_text:
+        return "Video YouTube tomonidan mavjud emas, o'chirilgan yoki hududingizda cheklangan."
+    if "requested format is not available" in error_text:
+        return "Bu video formati hozir mavjud emas. Boshqa formatni tanlang."
+    return "Yuklab bo'lmadi. Public YouTube havolasini tekshiring yoki keyinroq urinib ko'ring."
 
 
 def download_media(url: str, media_type: str, directory: str) -> Path:
@@ -153,22 +178,14 @@ async def download_choice(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     )
     except (yt_dlp.utils.DownloadError, OSError, RuntimeError, TelegramError) as error:
         print(f"YouTube yuklash xatosi: {error!r}")
-        error_text = str(error).lower()
-        if "ffmpeg" in error_text or "ffprobe" in error_text:
-            message = "Serverda ffmpeg topilmadi. Render Docker deploy ishlatayotganini tekshiring."
-        elif "sign in" in error_text or "private" in error_text:
-            message = "Bu video ochiq emas yoki kirish talab qiladi. Faqat public videolar qo'llanadi."
-        else:
-            message = "Yuklab bo'lmadi. Public YouTube havolasini qayta tekshiring yoki keyinroq urinib ko'ring."
-        await query.message.reply_text(
-            message
-        )
+        await query.message.reply_text(download_error_message(error))
 
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
-    if is_public_youtube_url(text):
-        context.user_data["youtube_url"] = text
+    youtube_url = normalize_youtube_url(text)
+    if youtube_url:
+        context.user_data["youtube_url"] = youtube_url
         await update.message.reply_text(
             "Qaysi format kerak?",
             reply_markup=InlineKeyboardMarkup(
